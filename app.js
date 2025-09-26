@@ -1,31 +1,21 @@
-/* app.js
-   Dark UI real-time chat with public/private channels.
-   Users from users.json, BroadcastChannel for sync, localStorage for persistence.
-*/
-
 const USERS_JSON_URL = 'https://hr2.sibers.com/test/frontend/users.json';
-const STORAGE_KEY = 'rtchat_v4_channels';
-const BC_NAME = 'rtchat_v4_bc';
+const STORAGE_KEY = 'rtchat_v5_channels';
+const BC_NAME = 'rtchat_v5_bc';
 
 let users = [];
-let channels = {};      // {id, name, owner, public, users:[], messages:[]}
-let currentUser = null; // id
+let channels = {};      // {id, name, owner, public, users:[names], messages:[{userName,text,ts}]}
+let currentUser = null; // stores the name of the logged in user
 let currentChannel = null;
 
 const bc = new BroadcastChannel(BC_NAME);
 
-/* -------------------------
-   Helpers
-   ------------------------- */
+/* Helpers */
 function uid(prefix = 'id') { return prefix + '_' + Math.random().toString(36).slice(2, 9); }
 function saveChannels() { localStorage.setItem(STORAGE_KEY, JSON.stringify(channels)); }
 function loadChannels() { channels = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-function findUserName(id) { const u = users.find(x => x.id === id); return u ? u.name : id; }
 function initials(name) { return name ? name.split(' ').map(p => p[0]).join('').toUpperCase() : '?'; }
 
-/* -------------------------
-   DOM refs
-   ------------------------- */
+/* DOM refs */
 const loginModal = document.getElementById('loginModal');
 const userSelect = document.getElementById('userSelect');
 const loginBtn = document.getElementById('loginBtn');
@@ -44,16 +34,14 @@ const userListEl = document.getElementById('userList');
 const searchInputEl = document.getElementById('searchInput');
 const searchResultsEl = document.getElementById('searchResults');
 
-/* -------------------------
-   Init
-   ------------------------- */
+/* Init */
 async function init() {
   loadChannels();
   await loadUsers();
   populateLoginSelect();
 
   const prev = sessionStorage.getItem('rtchat_user');
-  if (prev && users.some(u => u.id === prev)) userSelect.value = prev;
+  if (prev && users.some(u => u.name === prev)) userSelect.value = prev;
 
   loginBtn.onclick = onLogin;
   createChannelBtn.onclick = onCreateChannel;
@@ -61,7 +49,6 @@ async function init() {
   sendMessageBtn.onclick = onSendMessage;
   messageInputEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); onSendMessage(); } };
   searchInputEl.oninput = renderSearchResults;
-  searchResultsEl.onclick = e => { if (e.target.tagName === 'BUTTON') e.target.click(); };
 
   bc.onmessage = onBCMessage;
 
@@ -73,22 +60,21 @@ async function loadUsers() {
   try {
     const res = await fetch(USERS_JSON_URL);
     const data = await res.json();
-    users = data.map(u => ({ id: u.id, name: u.name }));
+    users = data.map(u => ({ name: u.name }));
   } catch {
+    // fallback users in case fetch fails
     users = [
-      { id: 'u1', name: 'Alice Cooper' },
-      { id: 'u2', name: 'Bob Marley' },
-      { id: 'u3', name: 'Carl Sagan' },
-      { id: 'u4', name: 'Diana Prince' }
+      { name: 'Alice Cooper' },
+      { name: 'Bob Marley' },
+      { name: 'Carl Sagan' },
+      { name: 'Diana Prince' }
     ];
   }
 }
 
-/* -------------------------
-   Login
-   ------------------------- */
+/* Login */
 function populateLoginSelect() {
-  userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+  userSelect.innerHTML = users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
 }
 function onLogin() {
   currentUser = userSelect.value;
@@ -99,14 +85,16 @@ function onLogin() {
   updateChatView();
 }
 
-/* -------------------------
-   Channels
-   ------------------------- */
+/* Channels */
 function onCreateChannel() {
   if (!currentUser) return;
   const name = prompt('Название канала:');
   if (!name) return;
+
+  // Public = anyone can join
+  // Private = only invited users can join
   const isPublic = confirm('Сделать канал публичным? Ок = публичный, Отмена = приватный');
+
   const id = uid('ch');
   const ch = { id, name, owner: currentUser, public: isPublic, users: [currentUser], messages: [] };
   channels[id] = ch;
@@ -118,7 +106,10 @@ function onCreateChannel() {
 function onDeleteChannel() {
   if (!currentChannel) return;
   const ch = channels[currentChannel];
+
+  // Only the owner can delete the channel
   if (!ch || ch.owner !== currentUser) return;
+
   if (!confirm(`Удалить канал "${ch.name}"?`)) return;
   delete channels[currentChannel];
   saveChannels();
@@ -138,7 +129,10 @@ function renderChannelList() {
   arr.forEach(ch => {
     const li = document.createElement('li');
     li.className = (currentChannel === ch.id) ? 'active' : '';
-    li.innerHTML = `<div>${ch.name}</div><div style="font-size:12px;opacity:.7">${ch.users.length} участн. ${ch.public ? '• публичный' : '• приватный'}</div>`;
+    li.innerHTML = `
+      <div>${ch.name}</div>
+      <div class="ch-meta">${ch.users.length} участн. ${ch.public ? '• публичный' : '• приватный'}</div>
+    `;
     li.onclick = () => {
       if (!ch.users.includes(currentUser)) {
         if (ch.public && confirm(`Вступить в публичный канал "${ch.name}"?`)) {
@@ -160,111 +154,127 @@ function openChannel(id) {
   const ch = channels[id];
   if (!ch) { updateChatView(); return; }
   channelTitleEl.textContent = ch.name;
+
+  // Show delete button only if current user is the owner
   deleteChannelBtn.style.display = (ch.owner === currentUser) ? 'inline-block' : 'none';
+
   const isMember = ch.users.includes(currentUser);
   messageInputEl.disabled = !isMember;
   sendMessageBtn.disabled = !isMember;
+
   renderMessages();
   renderUsers();
 }
 
-function joinChannel(id, userId) {
+function joinChannel(id, userName) {
   const ch = channels[id];
   if (!ch) return;
-  if (!ch.users.includes(userId)) ch.users.push(userId);
+  if (!ch.users.includes(userName)) ch.users.push(userName);
   saveChannels();
   bc.postMessage({ type: 'updateUsers', channelId: id, users: ch.users });
   openChannel(id);
 }
 
-/* -------------------------
-   Users
-   ------------------------- */
+/* Users */
 function renderUsers() {
   userListEl.innerHTML = '';
   const ch = channels[currentChannel];
   if (!ch) return;
-  ch.users.forEach(uid => {
+
+  ch.users.forEach(uName => {
     const li = document.createElement('li');
-    li.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
-      <div class="avatar">${initials(findUserName(uid))}</div>
-      ${findUserName(uid)}
-    </div>`;
-    if (ch.owner === currentUser && uid !== currentUser) {
+    li.innerHTML = `
+      <div class="user-entry">
+        <div class="avatar">${initials(uName)}</div>
+        ${uName} ${uName === ch.owner ? '<span class="owner-label">(владелец)</span>' : ''}
+      </div>
+    `;
+
+    // Owner can kick other users (only in private channels!)
+    if (!ch.public && ch.owner === currentUser && uName !== currentUser) {
       const btn = document.createElement('button');
       btn.textContent = '×';
-      btn.onclick = () => kickUser(currentChannel, uid);
+      btn.title = 'Удалить пользователя';
+      btn.onclick = () => kickUser(currentChannel, uName);
       li.appendChild(btn);
     }
     userListEl.appendChild(li);
   });
 }
-function kickUser(channelId, uid) {
+
+function kickUser(channelId, uName) {
   const ch = channels[channelId];
   if (!ch || ch.owner !== currentUser) return;
-  ch.users = ch.users.filter(u => u !== uid);
+
+  ch.users = ch.users.filter(u => u !== uName);
   saveChannels();
   bc.postMessage({ type: 'updateUsers', channelId, users: ch.users });
   renderUsers();
 }
 
-/* -------------------------
-   Search & add
-   ------------------------- */
+/* Search & add */
 function renderSearchResults() {
   const q = searchInputEl.value.toLowerCase();
   searchResultsEl.innerHTML = '';
-  if (!q) return;
   const ch = channels[currentChannel];
-  const arr = users.filter(u => u.name.toLowerCase().includes(q) && (!ch || !ch.users.includes(u.id)));
+  if (!ch) return;
+
+  const arr = users.filter(u =>
+    !ch.users.includes(u.name) &&
+    u.name.toLowerCase().includes(q)
+  );
+
   arr.forEach(u => {
     const li = document.createElement('li');
     li.innerHTML = `${u.name} <button>Добавить</button>`;
     li.querySelector('button').onclick = () => {
-      if (!currentChannel) return;
-      ch.users.push(u.id);
-      saveChannels();
-      bc.postMessage({ type: 'updateUsers', channelId: currentChannel, users: ch.users });
-      renderUsers();
-      renderSearchResults();
+      if (!ch.users.includes(u.name)) {
+        ch.users.push(u.name);
+        saveChannels();
+        bc.postMessage({ type: 'updateUsers', channelId: currentChannel, users: ch.users });
+        renderUsers();
+        renderSearchResults();
+      }
     };
     searchResultsEl.appendChild(li);
   });
 }
 
-/* -------------------------
-   Messages
-   ------------------------- */
+/* Messages */
 function onSendMessage() {
   const txt = messageInputEl.value.trim();
   if (!txt) return;
   const ch = channels[currentChannel];
   if (!ch || !ch.users.includes(currentUser)) return;
-  const m = { id: uid('m'), userId: currentUser, text: txt, ts: Date.now() };
+
+  const m = { id: uid('m'), userName: currentUser, text: txt, ts: Date.now() };
   ch.messages.push(m);
   saveChannels();
   bc.postMessage({ type: 'newMessage', channelId: currentChannel, message: m });
   renderMessages();
   messageInputEl.value = '';
 }
+
 function renderMessages() {
   chatMessagesEl.innerHTML = '';
   const ch = channels[currentChannel];
   if (!ch) return;
   ch.messages.forEach(m => {
     const div = document.createElement('div');
-    div.className = 'message' + (m.userId === currentUser ? ' self' : '');
-    div.innerHTML = `<div class="avatar">${initials(findUserName(m.userId))}</div>
-      <div class="message-content"><strong>${findUserName(m.userId)}</strong><div>${m.text}</div>
-      <div style="font-size:11px;opacity:.6">${new Date(m.ts).toLocaleTimeString()}</div></div>`;
+    div.className = 'message' + (m.userName === currentUser ? ' self' : '');
+    div.innerHTML = `
+      <div class="avatar">${initials(m.userName)}</div>
+      <div class="message-content">
+        <strong>${m.userName}</strong>
+        <div>${m.text}</div>
+        <div class="msg-time">${new Date(m.ts).toLocaleTimeString()}</div>
+      </div>`;
     chatMessagesEl.appendChild(div);
   });
   chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
 }
 
-/* -------------------------
-   Broadcast sync
-   ------------------------- */
+/* Broadcast sync */
 function onBCMessage(ev) {
   const d = ev.data;
   if (!d) return;
@@ -279,9 +289,7 @@ function onBCMessage(ev) {
   if (d.channelId === currentChannel) { renderUsers(); renderMessages(); }
 }
 
-/* -------------------------
-   View
-   ------------------------- */
+/* View */
 function updateChatView() {
   if (!currentChannel) {
     channelTitleEl.textContent = 'Выберите канал';

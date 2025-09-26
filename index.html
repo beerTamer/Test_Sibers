@@ -2,52 +2,54 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Real-time Chat</title>
+  <title>RT Chat</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Логин -->
+  <!-- Login Modal -->
   <div id="loginModal" class="modal">
     <div class="modal-content">
-      <h2>Кто вы?</h2>
+      <h2>Вход</h2>
       <select id="userSelect"></select>
       <button id="loginBtn">Войти</button>
     </div>
   </div>
 
-  <!-- Основное приложение -->
-  <div class="app" style="display:none;">
-    <!-- Сайдбар каналов -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <h2>Каналы</h2>
-        <button id="createChannelBtn">+</button>
-      </div>
+  <!-- App -->
+  <div class="app" style="display:none">
+    <!-- Sidebar (channels) -->
+    <div class="sidebar">
+      <h2>Каналы</h2>
       <ul id="channelList"></ul>
-    </aside>
+      <button id="createChannelBtn">+</button>
+    </div>
 
-    <!-- Чат -->
-    <main class="chat">
+    <!-- Main chat -->
+    <div class="chat">
       <div class="chat-header">
         <h2 id="channelTitle">Выберите канал</h2>
-        <button id="deleteChannelBtn" class="danger" style="display:none;">Удалить канал</button>
+        <button id="deleteChannelBtn" style="display:none">Удалить канал</button>
       </div>
-      <div class="chat-body" id="chatMessages"></div>
-      <div class="chat-footer">
-        <input type="text" id="messageInput" placeholder="Введите сообщение..." disabled>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div class="chat-input">
+        <input id="messageInput" type="text" placeholder="Введите сообщение..." disabled />
         <button id="sendMessageBtn" disabled>Отправить</button>
       </div>
-    </main>
+    </div>
 
-    <!-- Сайдбар пользователей -->
-    <aside class="users">
+    <!-- Sidebar (users) -->
+    <div class="users-sidebar">
       <h2>Участники</h2>
       <ul id="userList"></ul>
-      <div class="user-search">
-        <input type="text" id="searchInput" placeholder="Добавить пользователя...">
+
+      <h3 style="margin-top:15px">Поиск пользователя</h3>
+      <input type="text" id="searchInput" placeholder="Поиск по имени..." />
+
+      <!-- Scrollable list -->
+      <div id="searchWrapper">
         <ul id="searchResults"></ul>
       </div>
-    </aside>
+    </div>
   </div>
 
   <script src="app.js"></script>
